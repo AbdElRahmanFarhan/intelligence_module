@@ -10,7 +10,7 @@ from abb_robot_msgs.srv import SetIOSignal, SetIOSignalRequest, TriggerWithResul
 prev_state = 'P1'
 
 # define state Capturing_image
-next_state = {'P1': {'screws detected': 'P2'},
+next_state = {'P1': {'screws': 'P2'},
               'P2': {'cutting done': 'P3'},
               'P3': {'flipping done': 'P4'},
               'P4': {'cover only': 'P5'},
@@ -125,11 +125,12 @@ class Processing(smach.State):
 class Cutting(smach.State):
     def __init__(self):
         smach.State.__init__(self, outcomes=[
-                             'Cutting Done', 'Collision'], output_keys=['prev_state'])
+                             'Cutting Done', 'Collision'], output_keys=['prev_state','captured_objects'])
 
     def execute(self, userdata):
         received_msg = rospy.wait_for_message('/done', String)
         if received_msg.data == "Done":
+            userdata.captured_objects = 'cutting done'
             return 'Cutting Done'
         elif received_msg.data == "cutting failed":
             userdata.prev_state = 'cutting'
@@ -141,11 +142,16 @@ class Cutting(smach.State):
 class Screw_loosening(smach.State):
     def __init__(self):
         smach.State.__init__(self, outcomes=[
-                             'Screw Loosening Done'])
+                             'Screw Loosening Done', 'Collision'], output_keys=['prev_state','captured_objects'])
 
     def execute(self, userdata):
         received_msg = rospy.wait_for_message('/done', String)
-        return 'Screw Loosening Done'
+        if received_msg.data == "Done":
+            userdata.captured_objects = 'screws success'
+            return 'Screw Loosening Done'
+        elif received_msg.data == "screw failed":
+            userdata.prev_state = 'screw'
+            return 'Collision'
 
 # define state Gripping
 
@@ -153,11 +159,12 @@ class Screw_loosening(smach.State):
 class Gripping(smach.State):
     def __init__(self):
         smach.State.__init__(self, outcomes=[
-                             'Gripping Done', 'Gripping Failed'])
+                             'Gripping Done', 'Gripping Failed'], output_keys=['captured_objects'])
 
     def execute(self, userdata):
         received_msg = rospy.wait_for_message('/done', String)
         if received_msg.data == "Gripping Done":
+            userdata.captured_objects = 'pick done'
             return 'Gripping Done'
         else:
             return 'Gripping Failed'
@@ -167,10 +174,11 @@ class Gripping(smach.State):
 class Flipping(smach.State):
     def __init__(self):
         smach.State.__init__(self, outcomes=[
-                             'Flipping Done'])
+                             'Flipping Done'],output_keys=['captured_objects'])
 
     def execute(self, userdata):
         rospy.sleep(5)
+        userdata.captured_objects = 'flipping done'
         return 'Flipping Done'
 
 # define state Connection Error
@@ -262,7 +270,7 @@ def main():
         smach.StateMachine.add('Cutting', Cutting(),
                                transitions={'Cutting Done': 'Processing', 'Collision': 'Collision Error'})
         smach.StateMachine.add('Screw Loosening', Screw_loosening(),
-                               transitions={'Screw Loosening Done': 'Processing'})
+                               transitions={'Screw Loosening Done': 'Processing','Collision': 'Collision Error'})
         smach.StateMachine.add('Gripping', Gripping(),
                                transitions={'Gripping Done': 'Processing', 'Gripping Failed': 'Gripping Error'})
         smach.StateMachine.add('Flipping', Flipping(),
