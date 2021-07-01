@@ -4,13 +4,29 @@ import rospy
 import smach
 import smach_ros
 
-from std_msgs.msg import String
+from std_msgs.msg import String, Float32MultiArray
 from abb_robot_msgs.srv import SetIOSignal, SetIOSignalRequest, TriggerWithResultCode
+from perception.msg import PerceptionData
+from geometry_msgs.msg import PoseArray
 
 prev_state = 'P1'
 
+screws_list = []
+back_cover_cut_path_list = []
+front_cover_cut_path_list = []
+motherboard_list = []
+keyboard_list = []
+fan_list = []
+cpu_list = []
+ports_cut_path_list = []
+screws_cut_path_list = []
+cd_rom_list = []
+hard_disk_list = []
+flipping_points_list = []
+
+
 # define state Capturing_image
-next_state = {'P1': {'screws': 'P2'},
+next_state = {'P1': {'screws detected': 'P2'},
               'P2': {'cutting done': 'P3'},
               'P3': {'flipping done': 'P4'},
               'P4': {'cover only': 'P5'},
@@ -40,7 +56,22 @@ next_state = {'P1': {'screws': 'P2'},
               'P22': {'continue': 'P1'}}
 
 
-
+passed_argument = {'P2':screws_cut_path_list,
+                   'P3':flipping_points_list,
+                   'P5':front_cover_cut_path_list,
+                   'P7':screws_cut_path_list,
+                   'P8':keyboard_list,
+                   'P9':front_cover_cut_path_list, #TODO change it to center of cover for picking
+                   'P10':flipping_points_list,
+                   'P11':keyboard_list, #TODO change it to center of keyboard for picking
+                   'P13':screws_list,
+                   'P14':screws_cut_path_list,
+                   'P15':hard_disk_list,
+                   'P16':fan_list,
+                   'P17':cd_rom_list,
+                   'P18': motherboard_list,
+                   'P19': ports_cut_path_list,
+                   'P20': motherboard_list} #TODO account for P18
 
 class Capturing_image(smach.State):
     def __init__(self):
@@ -52,6 +83,19 @@ class Capturing_image(smach.State):
         
 
     def execute(self, userdata):
+        global screws_list
+        global back_cover_cut_path_list
+        global front_cover_cut_path_list
+        global motherboard_list
+        global keyboard_list
+        global fan_list
+        global cpu_list
+        global ports_cut_path_list
+        global screws_cut_path_list
+        global cd_rom_list
+        global hard_disk_list
+        global flipping_points_list
+
         rospy.sleep(2)
         capture_msg = String()
         capture_msg.data = "capture"
@@ -60,7 +104,29 @@ class Capturing_image(smach.State):
         if received_msg.data == "Camera Disconnected":
             return 'Camera Disconnected'
         else:
-            userdata.captured_objects = received_msg.data
+            components_msg  = rospy.wait_for_message("/perception_data", PerceptionData)
+            
+            screws_list = components_msg.screws.data
+            back_cover_cut_path_list = components_msg.back_cover_cut_path.data
+            front_cover_cut_path_list = components_msg.front_cover_cut_path.data
+            motherboard_list = components_msg.motherboard.data
+            keyboard_list = components_msg.keyboard.data
+            fan_list = components_msg.fan.data
+            ports_cut_path_list = components_msg.ports_cut_path
+            screws_cut_path_list = components_msg.screws_cut_path
+            cd_rom_list = components_msg.cd_rom.data
+            hard_disk_list = components_msg.hard_disk.data
+            flipping_points_list = components_msg.flipping_points.data
+            
+            
+            if len(screws_list) > 0:
+                userdata.captured_objects = 'screws detected'
+            elif len(front_cover_cut_path_list) > 0:
+                if len(keyboard_list) > 0:
+                    userdata.captured_objects = 'keyboard and cover'
+                else:
+                    userdata.captured_objects = 'cover only'
+            
             return 'Capture Done'
 
 
@@ -68,7 +134,8 @@ class Capturing_image(smach.State):
 class Processing(smach.State):
     def __init__(self):
         smach.State.__init__(
-            self, outcomes=['Cover', 'Screws', 'Loose Components', 'Need Data','Flip','Process Termination'], input_keys=['captured_objects'])
+            self, outcomes=['Cover', 'Screws', 'Loose Components', 'Need Data','Flip','Process Termination'],
+            input_keys=['captured_objects'], output_keys = ['operation_parts'])
 
         self.operation_publisher = rospy.Publisher(
             "/operation", String, queue_size=1)
@@ -82,8 +149,25 @@ class Processing(smach.State):
 
     def execute(self, userdata):
         global prev_state
-        rospy.sleep(5)
-        operation_msg = String()
+        # rospy.sleep(5)
+        # operation_msg = String()
+        
+        # if not(userdata.captured_objects == 'cutting done' 
+        # or userdata.captured_objects == 'screws success'
+        # or userdata.captured_objects == 'screws failed'
+        # or userdata.captured_objects == 'pick done'
+        # or userdata.captured_objects == 'pick failed'
+        # or userdata.captured_objects == 'flipping done'):
+            # if len(screws_list) > 0:
+            #     userdata.captured_objects = 'screws detected'
+            # elif len(front_cover_cut_path_list) > 0:
+            #     if len(keyboard_list) > 0:
+            #         userdata.captured_objects = 'keyboard and cover'
+            #     else:
+            #         userdata.captured_objects = 'cover only'
+                    
+                
+        
         # if userdata.captured_objects == "cover":
         #     operation_msg.data = "Cutting"
         #     self.operation_publisher.publish(operation_msg)
@@ -101,6 +185,9 @@ class Processing(smach.State):
         # elif userdata.captured_objects is None:
         #     return 'Need Data'
         next_operation = next_state[prev_state][userdata.captured_objects]
+        if next_operation in passed_argument.keys():
+            userdata.operation_parts = passed_argument[next_operation]
+        passed_argument[next_operation] = []
         if next_operation in self.capture_list:
             prev_state = next_operation
             return 'Need Data'
@@ -125,9 +212,22 @@ class Processing(smach.State):
 class Cutting(smach.State):
     def __init__(self):
         smach.State.__init__(self, outcomes=[
-                             'Cutting Done', 'Collision'], output_keys=['prev_state','captured_objects'])
+                             'Cutting Done', 'Collision'],
+                             input_keys = ['operation_parts'],output_keys=['prev_state','captured_objects'])
+        self.cutting_px_pub = rospy.Publisher("/cutting_path", Float32MultiArray, queue_size=1)
+        self.cutting_xyz_pub = rospy.Publisher("/cut_xyz", PoseArray, queue_size=1)
+        
 
     def execute(self, userdata):
+        rospy.sleep(2)
+        
+        cutting_px_msg = Float32MultiArray()
+        cutting_px_msg.data = userdata.operation_parts
+        self.cutting_px_pub.publish(cutting_px_msg)
+        
+        received_xyz = rospy.wait_for_message('/px_to_xyz', PoseArray)
+        self.cutting_xyz_pub.publish(received_xyz)
+        
         received_msg = rospy.wait_for_message('/done', String)
         if received_msg.data == "Done":
             userdata.captured_objects = 'cutting done'
@@ -142,9 +242,21 @@ class Cutting(smach.State):
 class Screw_loosening(smach.State):
     def __init__(self):
         smach.State.__init__(self, outcomes=[
-                             'Screw Loosening Done', 'Collision'], output_keys=['prev_state','captured_objects'])
+                             'Screw Loosening Done', 'Collision'],
+                             input_keys = ['operation_parts'], output_keys=['prev_state','captured_objects'])
+        self.screw_px_pub = rospy.Publisher("/cutting_path", Float32MultiArray, queue_size=1)
+        self.screw_xyz_pub = rospy.Publisher("/screw_xyz", PoseArray, queue_size=1)
 
     def execute(self, userdata):
+        rospy.sleep(2)
+        
+        screw_px_msg = Float32MultiArray()
+        screw_px_msg.data = userdata.operation_parts
+        self.screw_px_pub.publish(screw_px_msg)
+        
+        received_xyz = rospy.wait_for_message('/px_to_xyz', PoseArray)
+        self.screw_xyz_pub.publish(received_xyz)
+        
         received_msg = rospy.wait_for_message('/done', String)
         if received_msg.data == "Done":
             userdata.captured_objects = 'screws success'
@@ -159,9 +271,21 @@ class Screw_loosening(smach.State):
 class Gripping(smach.State):
     def __init__(self):
         smach.State.__init__(self, outcomes=[
-                             'Gripping Done', 'Gripping Failed'], output_keys=['captured_objects'])
+                             'Gripping Done', 'Gripping Failed'],
+                             input_keys = ['operation_parts'], output_keys=['captured_objects'])
+        self.grip_px_pub = rospy.Publisher("/cutting_path", Float32MultiArray, queue_size=1)
+        self.grip_xyz_pub = rospy.Publisher("/grip_xyz", PoseArray, queue_size=1)
 
     def execute(self, userdata):
+        rospy.sleep(2)
+        
+        grip_px_msg = Float32MultiArray()
+        grip_px_msg.data = userdata.operation_parts
+        self.grip_px_pub.publish(grip_px_msg)
+        
+        received_xyz = rospy.wait_for_message('/px_to_xyz', PoseArray)
+        self.grip_xyz_pub.publish(received_xyz)
+        
         received_msg = rospy.wait_for_message('/done', String)
         if received_msg.data == "Gripping Done":
             userdata.captured_objects = 'pick done'
@@ -174,10 +298,22 @@ class Gripping(smach.State):
 class Flipping(smach.State):
     def __init__(self):
         smach.State.__init__(self, outcomes=[
-                             'Flipping Done'],output_keys=['captured_objects'])
+                             'Flipping Done'],
+                             input_keys=['operation_parts'], output_keys=['captured_objects'])
+        
+        self.flip_px_pub = rospy.Publisher("/cutting_path", Float32MultiArray, queue_size=1)
+        self.flip_xyz_pub = rospy.Publisher("/flip_xyz", PoseArray, queue_size=1)
 
     def execute(self, userdata):
-        rospy.sleep(5)
+        rospy.sleep(2)
+        
+        flip_px_msg = Float32MultiArray()
+        flip_px_msg.data = userdata.operation_parts
+        self.flip_px_pub.publish(flip_px_msg)
+        
+        received_xyz = rospy.wait_for_message('/px_to_xyz', PoseArray)
+        self.flip_xyz_pub.publish(received_xyz)
+        
         userdata.captured_objects = 'flipping done'
         return 'Flipping Done'
 
