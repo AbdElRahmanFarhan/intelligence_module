@@ -9,69 +9,106 @@ from abb_robot_msgs.srv import SetIOSignal, SetIOSignalRequest, TriggerWithResul
 from perception.msg import PerceptionData
 from geometry_msgs.msg import PoseArray
 
-prev_state = 'P1'
+#prev_state = 'P1'
+prev_state = 'P12'
+
+gripping_tool  = '' #'suction cup' or 'gripper'
 
 screws_list = []
 back_cover_cut_path_list = []
 front_cover_cut_path_list = []
+front_cover_list = []
 motherboard_list = []
 keyboard_list = []
+keyboard_cut_path_list = []
 fan_list = []
 cpu_list = []
 ports_cut_path_list = []
 screws_cut_path_list = []
 cd_rom_list = []
+cd_rom_cut_path_list = []
 hard_disk_list = []
 flipping_points_list = []
 
 
 # define state Capturing_image
 next_state = {'P1': {'screws detected': 'P2'},
-              'P2': {'cutting done': 'P3'},
+              
+              'P2': {'cutting done': 'P3',
+                     'screws success': 'P3'},
+              
               'P3': {'flipping done': 'P4'},
-              'P4': {'cover only': 'P5'},
-              'P4': {'keyboard and cover': 'P8'},
+              
+              'P4': {'cover only': 'P5',
+                     'keyboard and cover': 'P8'},
+              
               'P5': {'cutting done': 'P6'},
-              'P6': {'screws detected': 'P7'},
-              'P6': {'no screws': 'P9'},
+              
+              'P6': {'screws detected': 'P7',
+                     'no screws': 'P9'},
+              
               'P7': {'cutting done': 'P9'},
               'P8': {'cutting done': 'P11'},
-              'P9': {'pick done': 'P12'},
-              'P9': {'pick failed': 'P10'},
+              
+              'P9': {'pick done': 'P12',
+                     'pick failed': 'P10'},
+              
               'P10': {'flipping done': 'P1'},
               'P11': {'pick failed': 'P10'},
-              'P12': {'screws detected': 'P13'},
-              'P13': {'screws success': 'P15'},
-              'P13': {'screws failed': 'P14'},
+              
+              'P12': {'screws detected': 'P13',
+                      'cpu screws': 'P24'},
+              
+              'P13': {'screws success': 'P15',
+                      'screws failed': 'P14'},
+              
               'P14': {'cutting done': 'P15'},
               'P15': {'pick done': 'P16'},
               'P16': {'pick done': 'P17'},
               'P17': {'pick done': 'P18'},
-              'P18': {'pick done': 'P21'},
-              'P18': {'pick failed': 'P19'},
+              
+              'P18': {'pick done': 'P21',
+                      'pick failed': 'P19'},
+              
               'P19': {'cutting done': 'P20'},
-              'P20': {'pick failed': 'P22'},
-              'P20': {'pick done': 'P21'},
+              
+              'P20': {'pick failed': 'P22',
+                      'pick done': 'P21'},
+              
               'P21': {'reset': 'P1'},
-              'P22': {'continue': 'P1'}}
+              'P22': {'continue': 'P1'},
+              
+              'P24': {'flipping done': 'P25'},
+              'P25': {'cpu screws': 'P26'},
+              'P26': {'cutting done': 'P27'},
+              'P27': {'flipping done': ''}}
+
+sorting_boxes = {'P9': 'plastic box',
+                 'P11': 'plastic box',
+                 'P15': 'hard disk box',
+                 'P16': 'fan box',
+                 'P17': 'CD ROM box',
+                 'P18': 'motherboard box',
+                 'P20': 'motherboard box'}
 
 
-passed_argument = {'P2':screws_cut_path_list,
-                   'P3':flipping_points_list,
-                   'P5':front_cover_cut_path_list,
-                   'P7':screws_cut_path_list,
-                   'P8':keyboard_list,
-                   'P9':front_cover_cut_path_list, #TODO change it to center of cover for picking
-                   'P10':flipping_points_list,
-                   'P11':keyboard_list, #TODO change it to center of keyboard for picking
-                   'P13':screws_list,
-                   'P14':screws_cut_path_list,
-                   'P15':hard_disk_list,
-                   'P16':fan_list,
-                   'P17':cd_rom_list,
-                   'P18': motherboard_list,
-                   'P19': ports_cut_path_list,
-                   'P20': motherboard_list} #TODO account for P18
+# passed_argument = {#'P2':screws_cut_path_list,
+#                    'P2':screws_list,
+#                    'P3':flipping_points_list,
+#                    'P5':front_cover_cut_path_list,
+#                    'P7':screws_cut_path_list,
+#                    'P8':keyboard_list,
+#                    'P9':front_cover_cut_path_list, #TODO change it to center of cover for picking
+#                    'P10':flipping_points_list,
+#                    'P11':keyboard_list, #TODO change it to center of keyboard for picking
+#                    'P13':screws_list,
+#                    'P14':screws_cut_path_list,
+#                    'P15':hard_disk_list,
+#                    'P16':fan_list,
+#                    'P17':cd_rom_list,
+#                    'P18': motherboard_list,
+#                    'P19': ports_cut_path_list,
+#                    'P20': motherboard_list} #TODO account for P18
 
 class Capturing_image(smach.State):
     def __init__(self):
@@ -86,15 +123,19 @@ class Capturing_image(smach.State):
         global screws_list
         global back_cover_cut_path_list
         global front_cover_cut_path_list
+        global front_cover_list
         global motherboard_list
         global keyboard_list
+        global keyboard_cut_path_list
         global fan_list
         global cpu_list
         global ports_cut_path_list
         global screws_cut_path_list
         global cd_rom_list
+        global cd_rom_cut_path_list
         global hard_disk_list
         global flipping_points_list
+
 
         rospy.sleep(2)
         capture_msg = String()
@@ -109,8 +150,10 @@ class Capturing_image(smach.State):
             screws_list = components_msg.screws.data
             back_cover_cut_path_list = components_msg.back_cover_cut_path.data
             front_cover_cut_path_list = components_msg.front_cover_cut_path.data
+            front_cover_list = components_msg.front_cover.data
             motherboard_list = components_msg.motherboard.data
             keyboard_list = components_msg.keyboard.data
+            keyboard_cut_path_list = components_msg.keyboard_cut_path.data
             fan_list = components_msg.fan.data
             ports_cut_path_list = components_msg.ports_cut_path
             screws_cut_path_list = components_msg.screws_cut_path
@@ -141,14 +184,35 @@ class Processing(smach.State):
             "/operation", String, queue_size=1)
 
         self.capture_list = list(['P1', 'P4', 'P6', 'P12'])
-        self.cut_list = list(['P2', 'P5', 'P7', 'P8', 'P14', 'P19'])
-        self.screw_list = list(['P13'])
+        self.cut_list = list(['P5', 'P7', 'P8', 'P14', 'P19'])
+        self.screw_list = list(['P2', 'P13'])
         self.grip_list = list(['P9', 'P11', 'P15', 'P16', 'P17', 'P18', 'P20'])
         self.flip_list = list(['P3', 'P10'])
         self.wait_list = list(['P21', 'P22'])
+        self.suction_list = list(['P9','P15','P17'])
 
     def execute(self, userdata):
         global prev_state
+        global gripping_tool
+        
+        passed_argument = {#'P2':screws_cut_path_list,
+                   'P2':screws_list,
+                   'P3':flipping_points_list,
+                   'P5':front_cover_cut_path_list,
+                   'P7':screws_cut_path_list,
+                   'P8':keyboard_cut_path_list,
+                   'P9':front_cover_list, 
+                   'P10':flipping_points_list,
+                   'P11':keyboard_list, 
+                   'P13':screws_list,
+                   'P14':screws_cut_path_list,
+                   'P15':hard_disk_list,
+                   'P16':fan_list,
+                   'P17':cd_rom_list,
+                   'P18': motherboard_list,
+                   'P19': ports_cut_path_list,
+                   'P20': motherboard_list} #TODO account for P18
+
         # rospy.sleep(5)
         # operation_msg = String()
         
@@ -184,10 +248,13 @@ class Processing(smach.State):
         #     return 'Loose Components'
         # elif userdata.captured_objects is None:
         #     return 'Need Data'
+        #print("Prev_State_1 =", prev_state )
         next_operation = next_state[prev_state][userdata.captured_objects]
         if next_operation in passed_argument.keys():
             userdata.operation_parts = passed_argument[next_operation]
+         #   print("First Operation Parts =", passed_argument[next_operation] )
         passed_argument[next_operation] = []
+        #print("Second Operation Parts =", passed_argument[next_operation] )
         if next_operation in self.capture_list:
             prev_state = next_operation
             return 'Need Data'
@@ -195,10 +262,17 @@ class Processing(smach.State):
             prev_state = next_operation
             return 'Cover'
         elif next_operation in self.grip_list:
+            if next_operation in self.suction_list:
+                gripping_tool = 'suction cup'
+            else:
+                gripping_tool = 'gripper'
+            
+            rospy.set_param('sorting destination', sorting_boxes[next_operation])  #set sorting destination to be read by gripping node  
             prev_state = next_operation
             return 'Loose Components'
         elif next_operation in self.screw_list:
             prev_state = next_operation
+         #   print("Prev_State_2 =", prev_state )
             return 'Screws'
         elif next_operation in self.flip_list:
             prev_state = next_operation
@@ -217,24 +291,43 @@ class Cutting(smach.State):
         self.cutting_px_pub = rospy.Publisher("/cutting_path", Float32MultiArray, queue_size=1)
         self.cutting_xyz_pub = rospy.Publisher("/cut_xyz", PoseArray, queue_size=1)
         
+        self.loop_list = ['P7','P14','P19']
 
     def execute(self, userdata):
         rospy.sleep(2)
         
-        cutting_px_msg = Float32MultiArray()
-        cutting_px_msg.data = userdata.operation_parts
-        self.cutting_px_pub.publish(cutting_px_msg)
-        
-        received_xyz = rospy.wait_for_message('/px_to_xyz', PoseArray)
-        self.cutting_xyz_pub.publish(received_xyz)
-        
-        received_msg = rospy.wait_for_message('/done', String)
-        if received_msg.data == "Done":
-            userdata.captured_objects = 'cutting done'
+        #in case of a list of contours, send one by one and wait for their completion
+        if prev_state in self.loop_list:
+            for loop_counter in range(0, len(userdata.operation_parts)):
+                cutting_px_msg = Float32MultiArray()
+                cutting_px_msg.data = userdata.operation_parts[loop_counter]
+                self.cutting_px_pub.publish(cutting_px_msg)
+
+                received_xyz = rospy.wait_for_message('/px_to_xyz', PoseArray)
+                self.cutting_xyz_pub.publish(received_xyz)
+
+                received_msg = rospy.wait_for_message('/done', String)
+                if received_msg.data == "cutting failed":
+                    userdata.prev_state = 'cutting'
+                    return 'Collision'
             return 'Cutting Done'
-        elif received_msg.data == "cutting failed":
-            userdata.prev_state = 'cutting'
-            return 'Collision'
+        
+        #in case of a single contour send it and wait for completion
+        else:
+            cutting_px_msg = Float32MultiArray()
+            cutting_px_msg.data = userdata.operation_parts
+            self.cutting_px_pub.publish(cutting_px_msg)
+            
+            received_xyz = rospy.wait_for_message('/px_to_xyz', PoseArray)
+            self.cutting_xyz_pub.publish(received_xyz)
+            
+            received_msg = rospy.wait_for_message('/done', String)
+            if received_msg.data == "Done":
+                userdata.captured_objects = 'cutting done'
+                return 'Cutting Done'
+            elif received_msg.data == "cutting failed":
+                userdata.prev_state = 'cutting'
+                return 'Collision'
 
 # define state Screw_loosening
 
@@ -248,10 +341,11 @@ class Screw_loosening(smach.State):
         self.screw_xyz_pub = rospy.Publisher("/screw_xyz", PoseArray, queue_size=1)
 
     def execute(self, userdata):
-        rospy.sleep(2)
+        rospy.sleep(5)
         
         screw_px_msg = Float32MultiArray()
         screw_px_msg.data = userdata.operation_parts
+        #print("Second Operation Parts =", userdata.operation_parts )
         self.screw_px_pub.publish(screw_px_msg)
         
         received_xyz = rospy.wait_for_message('/px_to_xyz', PoseArray)
@@ -275,6 +369,7 @@ class Gripping(smach.State):
                              input_keys = ['operation_parts'], output_keys=['captured_objects'])
         self.grip_px_pub = rospy.Publisher("/cutting_path", Float32MultiArray, queue_size=1)
         self.grip_xyz_pub = rospy.Publisher("/grip_xyz", PoseArray, queue_size=1)
+        self.suction_xyz_pub = rospy.Publisher("/suction_xyz", PoseArray, queue_size=1)
 
     def execute(self, userdata):
         rospy.sleep(2)
@@ -284,7 +379,10 @@ class Gripping(smach.State):
         self.grip_px_pub.publish(grip_px_msg)
         
         received_xyz = rospy.wait_for_message('/px_to_xyz', PoseArray)
-        self.grip_xyz_pub.publish(received_xyz)
+        if gripping_tool == 'suction cup':
+            self.suction_xyz_pub.publish(received_xyz)
+        else:
+            self.grip_xyz_pub.publish(received_xyz)
         
         received_msg = rospy.wait_for_message('/done', String)
         if received_msg.data == "Gripping Done":
@@ -313,6 +411,8 @@ class Flipping(smach.State):
         
         received_xyz = rospy.wait_for_message('/px_to_xyz', PoseArray)
         self.flip_xyz_pub.publish(received_xyz)
+        
+        received_msg = rospy.wait_for_message('/done', String)
         
         userdata.captured_objects = 'flipping done'
         return 'Flipping Done'
