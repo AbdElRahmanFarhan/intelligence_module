@@ -11,6 +11,7 @@ find_package(catkin REQUIRED COMPONENTS
   rospy
   std_msgs
   perception
+  cut_contour
 )
 
 ## System dependencies are found with CMake's conventions
@@ -105,7 +106,7 @@ find_package(catkin REQUIRED COMPONENTS
 catkin_package(
 #  INCLUDE_DIRS include
 #  LIBRARIES intelligence_module
-  CATKIN_DEPENDS perception
+  CATKIN_DEPENDS perception cut_contour
 #  DEPENDS system_lib
 )
 
